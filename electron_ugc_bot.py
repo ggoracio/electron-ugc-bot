@@ -15,8 +15,8 @@ from aiogram.utils.keyboard import (
 # ──────────────────────────────────────
 # 1.  НАСТРОЙКИ
 # ──────────────────────────────────────
-BOT_TOKEN         = os.getenv("8238527161:AAHoOVEMJWhWH_wPyZ2YhInOEWL-KxYZHk8")                      # токен бота
-MODERATOR_CHAT_ID = int(os.getenv("MOD_CHAT_ID", "-4831345051"))      # id супергруппы
+BOT_TOKEN         = os.getenv("BOT_TOKEN")                      # токен бота
+MODERATOR_CHAT_ID = int(os.getenv("MOD_CHAT_ID")      # id супергруппы
 
 logging.basicConfig(level=logging.INFO)
 bot = Bot(BOT_TOKEN, parse_mode=ParseMode.HTML)
