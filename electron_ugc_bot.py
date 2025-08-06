@@ -15,6 +15,22 @@ from aiogram.exceptions import TelegramForbiddenError, TelegramMigrateToChat
 from aiogram.filters import CommandStart
 from aiogram.utils.keyboard import ReplyKeyboardBuilder
 import asyncio
+from aiogram.client.default import DefaultBotProperties
+from aiogram.types import (
+    BotCommand,  # остальные нужные вам классы
+    ParseMode,
+    ReplyKeyboardMarkup,
+    KeyboardButton,
+    InlineKeyboardMarkup,
+    InlineKeyboardButton,
+)
+
+# …
+
+bot = Bot(
+    BOT_TOKEN,
+    default=DefaultBotProperties(parse_mode=ParseMode.HTML)  # здесь указываем default
+)
 
 logging.basicConfig(level=logging.INFO)
 
