@@ -74,9 +74,15 @@ def ensure_user(m: Message):
 # --- Keyboards ---
 main_kb = (
     ReplyKeyboardBuilder()
-    .add(*["/idea", "/photo", "/status"])
-    .adjust(3)
-    .as_markup(resize_keyboard=True)
+    from aiogram.types import KeyboardButton
+from aiogram.utils.keyboard import ReplyKeyboardBuilder
+
+kb = ReplyKeyboardBuilder()
+kb.add(
+    KeyboardButton(text="/idea"),
+    KeyboardButton(text="/feedback")   # ваши кнопки
+)
+kb.adjust(2)          # 2 кнопки в ряд
 )
 
 def mod_kb(sub_id: int):
