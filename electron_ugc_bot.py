@@ -1,91 +1,79 @@
-"""
-Electron UGC Bot – принимает идеи / feedback и шлёт их в модераторский чат
-aiogram-3
-"""
+#!/usr/bin/env python3
+# electron_ugc_bot.py
+# Полностью рабочая версия (aiogram 3)
 
 import os
+import logging
 import asyncio
-from collections import defaultdict
 
-from aiogram import Bot, Dispatcher, F
+from aiogram import Bot, Dispatcher, Router, F
 from aiogram.enums import ParseMode
-from aiogram.client.bot import DefaultBotProperties
 from aiogram.types import (
     Message,
-    KeyboardButton,
+    CallbackQuery,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
 )
-from aiogram.utils.keyboard import ReplyKeyboardBuilder
+from aiogram.client.default import DefaultBotProperties
 
-# ────────────────── конфигурация ────────────────────
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-ADMIN_CHAT_ID = int(os.getenv("ADMIN_CHAT_ID", "0"))
+# ─────────────────── настройки ───────────────────
+BOT_TOKEN   = os.getenv("BOT_TOKEN", "PASTE_YOUR_TOKEN_HERE")
+MOD_CHAT_ID = int(os.getenv("MOD_CHAT_ID", "-1001234567890"))  # id модераторского чата
 
-if not BOT_TOKEN or not ADMIN_CHAT_ID:
-    raise RuntimeError("Нужны переменные BOT_TOKEN и ADMIN_CHAT_ID")
+# ────────────────── инициализация ─────────────────
+logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s:%(message)s")
 
-bot = Bot(
-    BOT_TOKEN,
-    default=DefaultBotProperties(parse_mode=ParseMode.HTML)
-)
-dp = Dispatcher()
+bot     = Bot(BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+dp      = Dispatcher()
+router  = Router()
+dp.include_router(router)
 
-# ────────────────── клавиатура ──────────────────────
-def main_menu():
-    kb = ReplyKeyboardBuilder()
-    kb.add(
-    KeyboardButton(text="/idea"),
-    KeyboardButton(text="/feedback")
-    )
-    kb.adjust(2)
-    return kb.as_markup(resize_keyboard=True)
-
-# ────────────────── простейшее состояние ────────────
-waiting_for = defaultdict(lambda: None)        # user_id → "idea"/"fb"/None
-
-# ────────────────── хэндлеры команд ────────────────
-@dp.message(F.text == "/start")
-async def cmd_start(message: Message):
-    waiting_for.pop(message.from_user.id, None)
-    await message.answer(
-        "Привет! Я бот Электрона – собираю идеи и обратную связь.\n"
-        "Нажмите /idea или /feedback.",
-        reply_markup=main_menu(),
+# ──────────────── хендлер идеи ────────────────
+@router.message(F.text)
+async def idea(msg: Message) -> None:
+    """
+    Принимает любое текстовое сообщение от пользователя-автора,
+    копирует его в модераторский чат и отправляет карточку с кнопками.
+    """
+    # 1) копируем оригинал без клавиатуры
+    await bot.copy_message(
+        chat_id=MOD_CHAT_ID,
+        from_chat_id=msg.chat.id,
+        message_id=msg.message_id,
     )
 
-@dp.message(F.text == "/idea")
-async def cmd_idea(message: Message):
-    waiting_for[message.from_user.id] = "idea"
-    await message.answer(
-        "Опишите вашу идею одним сообщением. После отправки её увидят модераторы 📩"
+    # 2) карточка-уведомление с inline-кнопками
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[[
+            InlineKeyboardButton(text="✅ Одобрить", callback_data="approve"),
+            InlineKeyboardButton(text="❌ Отклонить", callback_data="reject"),
+        ]]
     )
 
-@dp.message(F.text == "/feedback")
-async def cmd_feedback(message: Message):
-    waiting_for[message.from_user.id] = "fb"
-    await message.answer(
-        "Оставьте обратную связь одним сообщением – мы обязательно прочитаем 🙂"
+    await bot.send_message(
+        MOD_CHAT_ID,
+        f"<b>Новая идея от "
+        f"{'@' + msg.from_user.username if msg.from_user.username else msg.from_user.id}</b>",
+        reply_markup=kb,
     )
 
-# ────────────────── приём одноразового ответа ───────
-@dp.message()
-async def catcher(message: Message):
-    state = waiting_for.get(message.from_user.id)
-    if state is None:       # пользователь не в режиме ввода
-        return
-    # формируем текст для админ-чата
-    kind = "💡 <b>Новая идея</b>" if state == "idea" else "✉️ <b>Feedback</b>"
-    text = (
-        f"{kind}\n"
-        f"<b>От:</b> {message.from_user.full_name} (<code>{message.from_user.id}</code>)\n"
-        f"<b>Текст:</b>\n{message.html_text}"
-    )
-    await bot.send_message(ADMIN_CHAT_ID, text)
-    await message.answer("Спасибо! Ваше сообщение отправлено модераторам 🙌")
+    # 3) ответ автору
+    await msg.answer("✅ Спасибо! Ваша идея отправлена модераторам.")
 
-    waiting_for.pop(message.from_user.id, None)   # сбрасываем состояние
+# ──────────────── обработка кнопок ────────────────
+@router.callback_query(F.data == "approve")
+async def on_approve(cb: CallbackQuery) -> None:
+    await cb.answer("Одобрено")
+    await cb.message.edit_text(cb.message.text + "\n\n✔️ <b>Одобрено</b>")
 
-# ────────────────── запуск бота ─────────────────────
-async def main():
+@router.callback_query(F.data == "reject")
+async def on_reject(cb: CallbackQuery) -> None:
+    await cb.answer("Отклонено")
+    await cb.message.edit_text(cb.message.text + "\n\n❌ <b>Отклонено</b>")
+
+# ───────────────────── main ───────────────────────
+async def main() -> None:
+    logging.info("Bot is starting...")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
