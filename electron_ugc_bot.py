@@ -17,8 +17,8 @@ from aiogram.types import (
 from aiogram.client.default import DefaultBotProperties
 
 # ─────────────────── настройки ───────────────────
-BOT_TOKEN   = os.getenv("BOT_TOKEN", "PASTE_YOUR_TOKEN_HERE")
-MOD_CHAT_ID = int(os.getenv("MOD_CHAT_ID", "-1001234567890"))  # id модераторского чата
+BOT_TOKEN   = os.getenv("BOT_TOKEN", "8238527161:AAHoOVEMJWhWH_wPyZ2YhInOEWL-KxYZHk8")
+MOD_CHAT_ID = int(os.getenv("MOD_CHAT_ID", "-4831345051"))  # id модераторского чата
 
 # ────────────────── инициализация ─────────────────
 logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s:%(message)s")
