@@ -24,7 +24,7 @@ from aiogram.utils.keyboard import ReplyKeyboardBuilder
 
 # --- НАСТРОЙКИ ----------------------------------------------------------------
 BOT_TOKEN   = os.getenv("BOT_TOKEN",   "PASTE_YOUR_TOKEN")
-MOD_CHAT_ID = int(os.getenv("MOD_CHAT_ID", "-1001234567890"))  # супергруппа-модератор
+MOD_CHAT_ID = int(os.getenv("MOD_CHAT_ID", "-4831345051"))  # супергруппа-модератор
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s:%(message)s")
 
