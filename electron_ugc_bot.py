@@ -37,8 +37,8 @@ class Form(StatesGroup):
 # ──────────────────────────────────────
 reply_kb = ReplyKeyboardMarkup(
     keyboard=[[
-        KeyboardButton("💡 Идея"),
-        KeyboardButton("📝 Фидбек")
+        KeyboardButton(text="💡 Идея"),
+        KeyboardButton(text="📝 Фидбек")
     ]],
     resize_keyboard=True
 )
