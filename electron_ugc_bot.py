@@ -3,7 +3,7 @@ import asyncio
 import logging
 import os
 
-from aiogram import Bot, Dispatcher, F, Router, types
+from aiogram import Bot, Dispatcher, F, types
 from aiogram.enums import ParseMode
 from aiogram.filters import CommandStart
 from aiogram.fsm.context import FSMContext
@@ -16,23 +16,31 @@ from aiogram.utils.keyboard import (
 # ──────────────────────────────────────
 # 1.  НАСТРОЙКИ
 # ──────────────────────────────────────
-BOT_TOKEN         = os.getenv("BOT_TOKEN")            # токен бота
-MODERATOR_CHAT_ID = int(os.getenv("MOD_CHAT_ID", 0))  # id супергруппы
+BOT_TOKEN         = os.getenv("BOT_TOKEN")
+MODERATOR_CHAT_ID = int(os.getenv("MOD_CHAT_ID", 0))
 
 logging.basicConfig(level=logging.INFO)
 bot = Bot(BOT_TOKEN, parse_mode=ParseMode.HTML)
-dp  = Dispatcher()   # корневой роутер
+dp  = Dispatcher()
 
 # ──────────────────────────────────────
 # 2.  СОСТОЯНИЯ
 # ──────────────────────────────────────
 class Form(StatesGroup):
-    choosing = State()   # пользователь выбирает «идея/фидбек»
+    welcomed = State()   # ждём нажатия «Приступить»
+    choosing = State()   # пользователь выбирает «Идея/Фидбек»
     writing  = State()   # пишет текст
 
 # ──────────────────────────────────────
 # 3.  КНОПКИ
 # ──────────────────────────────────────
+def begin_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[[
+            InlineKeyboardButton(text="🚀 Приступить", callback_data="begin")
+        ]]
+    )
+
 reply_kb = ReplyKeyboardMarkup(
     keyboard=[[
         KeyboardButton(text="💡 Идея"),
@@ -42,16 +50,13 @@ reply_kb = ReplyKeyboardMarkup(
 )
 
 def restart_kb() -> InlineKeyboardMarkup:
-    """Кнопка «Предложить ещё идею» для пользователя после завершения."""
     return InlineKeyboardMarkup(
         inline_keyboard=[[
-            InlineKeyboardButton(text="↩ Предложить ещё идею",
-                                 callback_data="restart")
+            InlineKeyboardButton(text="↩ Предложить ещё идею", callback_data="restart")
         ]]
     )
 
 def mod_inline(msg_id: int, user_id: int) -> InlineKeyboardMarkup:
-    """Кнопки модератора под идеей/фидбеком."""
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="✅ Одобрить",
@@ -68,13 +73,25 @@ def mod_inline(msg_id: int, user_id: int) -> InlineKeyboardMarkup:
 # ──────────────────────────────────────
 @dp.message(CommandStart())
 async def cmd_start(m: types.Message, state: FSMContext):
-    """Стартовое сообщение."""
+    """Приветственное сообщение + «Приступить»."""
     await state.clear()
     await m.answer(
-        "Привет! Поделитесь <b>идеей</b> или оставьте <b>фидбек</b> 🙂",
+        "👋 <b>Привет!</b>\n\n"
+        "Здесь вы можете поделиться свежей <b>идеей</b> или оставить <b>фидбек</b>.\n"
+        "Нажмите кнопку ниже, чтобы начать.",
+        reply_markup=begin_kb()
+    )
+    await state.set_state(Form.welcomed)
+
+# нажали «Приступить»
+@dp.callback_query(F.data == "begin", Form.welcomed)
+async def cb_begin(cb: types.CallbackQuery, state: FSMContext):
+    await cb.message.answer(
+        "Отлично! Что вы хотите отправить?",
         reply_markup=reply_kb
     )
     await state.set_state(Form.choosing)
+    await cb.answer()
 
 # выбор типа
 @dp.message(Form.choosing, F.text.in_(["💡 Идея", "📝 Фидбек"]))
@@ -93,7 +110,6 @@ async def receive_text(m: types.Message, state: FSMContext):
     data = await state.get_data()
     tag  = data["tag"]
 
-    # пересылаем в мод-чат
     sent = await bot.copy_message(
         chat_id=MODERATOR_CHAT_ID,
         from_chat_id=m.chat.id,
@@ -101,26 +117,28 @@ async def receive_text(m: types.Message, state: FSMContext):
         caption=f"<b>{tag}</b> от "
                 f"<a href='tg://user?id={m.from_user.id}'>{m.from_user.full_name}</a>\n\n{m.text}"
     )
-
-    # добавляем Inline-кнопки модератора
     await bot.edit_message_reply_markup(
         chat_id=MODERATOR_CHAT_ID,
         message_id=sent.message_id,
         reply_markup=mod_inline(sent.message_id, m.from_user.id)
     )
 
-    # отвечаем пользователю + кнопка рестарта
     await m.answer(
         "Спасибо! Ваша запись отправлена на модерацию. ✅",
         reply_markup=restart_kb()
     )
     await state.clear()
 
-# кнопка «Предложить ещё идею»
+# «Предложить ещё идею»
 @dp.callback_query(F.data == "restart")
 async def restart(cb: types.CallbackQuery, state: FSMContext):
-    await cb.answer()           # закрыть «часики»
-    await cmd_start(cb.message, state)   # перезапускаем сценарий
+    await cb.answer()
+    # сразу показываем выбор «идея/фидбек», минуя приветствие
+    await cb.message.answer(
+        "Что вы хотите отправить?",
+        reply_markup=reply_kb
+    )
+    await state.set_state(Form.choosing)
 
 # обработка нажатий модератора
 @dp.callback_query(F.data.regexp(r"^(approve|edit|reject):"))
@@ -132,17 +150,15 @@ async def moderation_action(cb: types.CallbackQuery):
         text = "Ваша идея одобрена! 🎉"
     elif action == "edit":
         text = "Спасибо! Есть пара уточнений по вашей идее; мы свяжемся позже. ✏️"
-    else:  # reject
+    else:
         text = "К сожалению, ваша идея не подошла. Но не останавливайтесь! ❌"
 
-    # отправляем автору
     try:
         await bot.send_message(user_id, text, reply_markup=restart_kb())
     except Exception as e:
         logging.warning(f"Не удалось написать пользователю {user_id}: {e}")
 
-    # скрываем кнопки у модератора
-    await cb.message.edit_reply_markup()
+    await cb.message.edit_reply_markup()  # убираем кнопки модератора
     await cb.answer("Готово!")
 
 # ──────────────────────────────────────
