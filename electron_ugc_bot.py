@@ -1,101 +1,79 @@
-import logging
+#!/usr/bin/env python3
+# electron_ugc_bot.py
+# Полностью рабочая версия (aiogram 3)
+
 import os
+import logging
 import asyncio
-from aiogram import Bot, Dispatcher, F
-from aiogram.filters import Command
+
+from aiogram import Bot, Dispatcher, Router, F
+from aiogram.enums import ParseMode
 from aiogram.types import (
-    Message, CallbackQuery,
-    InlineKeyboardMarkup, InlineKeyboardButton,
-    ParseMode,
+    Message,
+    CallbackQuery,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
 )
+from aiogram.client.default import DefaultBotProperties
 
-# ─────────── настройки ───────────
-BOT_TOKEN    = os.getenv("BOT_TOKEN")          # задайте в переменных окружения
-MOD_CHAT_ID  = int(os.getenv("MOD_CHAT_ID"))   # id супергруппы-модерации (-100…)
+# ─────────────────── настройки ───────────────────
+BOT_TOKEN   = os.getenv("BOT_TOKEN", "PASTE_YOUR_TOKEN_HERE")
+MOD_CHAT_ID = int(os.getenv("MOD_CHAT_ID", "-1001234567890"))  # id модераторского чата
 
-if not BOT_TOKEN or not MOD_CHAT_ID:
-    raise SystemExit("❌  BOT_TOKEN или MOD_CHAT_ID не заданы!")
-
+# ────────────────── инициализация ─────────────────
 logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s:%(message)s")
 
-bot = Bot(BOT_TOKEN, parse_mode=ParseMode.HTML)
-dp  = Dispatcher()
+bot     = Bot(BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+dp      = Dispatcher()
+router  = Router()
+dp.include_router(router)
 
-# ─────────── клавиатуры ───────────
-choice_kb = InlineKeyboardMarkup(
-    inline_keyboard=[
-        [InlineKeyboardButton(text="💡 Идея",   callback_data="idea")],
-        [InlineKeyboardButton(text="✉️ Фидбэк", callback_data="feedback")],
-    ]
-)
-
-decision_kb = lambda from_id: InlineKeyboardMarkup(
-    inline_keyboard=[[
-        InlineKeyboardButton("✅ Принять",  callback_data=f"accept:{from_id}"),
-        InlineKeyboardButton("🚫 Отклонить", callback_data=f"reject:{from_id}")
-    ]]
-)
-
-restart_kb = InlineKeyboardMarkup(
-    inline_keyboard=[[InlineKeyboardButton("↩️ Ещё сообщение", callback_data="restart")]]
-)
-
-# ─────────── сценарий пользователя ───────────
-@dp.message(Command("start"))
-async def start(m: Message):
-    await m.answer(
-        "Привет! Что хотите отправить?",
-        reply_markup=choice_kb
+# ──────────────── хендлер идеи ────────────────
+@router.message(F.text)
+async def idea(msg: Message) -> None:
+    """
+    Принимает любое текстовое сообщение от пользователя-автора,
+    копирует его в модераторский чат и отправляет карточку с кнопками.
+    """
+    # 1) копируем оригинал без клавиатуры
+    await bot.copy_message(
+        chat_id=MOD_CHAT_ID,
+        from_chat_id=msg.chat.id,
+        message_id=msg.message_id,
     )
 
-@dp.callback_query(F.data.in_({"idea", "feedback"}))
-async def choose_type(c: CallbackQuery):
-    tag = "💡 Идея" if c.data == "idea" else "✉️ Фидбэк"
-    await c.message.answer(f"Хорошо, напишите {tag.lower()} одним сообщением.")
-    # запоминаем выбранный тип прямо в callback_data next step
-    await dp.storage.update_state(chat=c.message.chat.id, user=c.from_user.id, state=c.data)
-    await c.answer()
+    # 2) карточка-уведомление с inline-кнопками
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[[
+            InlineKeyboardButton(text="✅ Одобрить", callback_data="approve"),
+            InlineKeyboardButton(text="❌ Отклонить", callback_data="reject"),
+        ]]
+    )
 
-@dp.message()  # ловим любое текстовое сообщение, когда есть сохранённое state
-async def receive_text(m: Message, state: str | None):
-    if state not in {"idea", "feedback"}:
-        return  # пользователь написал «лишнее» — игнорируем
-
-    tag = "💡 <b>Идея</b>" if state == "idea" else "✉️ <b>Фидбэк</b>"
-    sent = await bot.send_message(
+    await bot.send_message(
         MOD_CHAT_ID,
-        f"{tag}\n\n{m.html_text}\n\n<b>От:</b> <a href='tg://user?id={m.from_user.id}'>{m.from_user.full_name}</a>",
-        reply_markup=decision_kb(m.from_user.id)
+        f"<b>Новая идея от "
+        f"{'@' + msg.from_user.username if msg.from_user.username else msg.from_user.id}</b>",
+        reply_markup=kb,
     )
 
-    await m.answer("Сообщение отправлено на модерацию ✅", reply_markup=restart_kb)
-    # очищаем state
-    await dp.storage.update_state(chat=m.chat.id, user=m.from_user.id, state=None)
+    # 3) ответ автору
+    await msg.answer("✅ Спасибо! Ваша идея отправлена модераторам.")
 
-# ─────────── сценарий модератора ───────────
-@dp.callback_query(F.data.startswith(("accept", "reject")))
-async def moderator_action(c: CallbackQuery):
-    action, user_id = c.data.split(":")
-    user_id = int(user_id)
+# ──────────────── обработка кнопок ────────────────
+@router.callback_query(F.data == "approve")
+async def on_approve(cb: CallbackQuery) -> None:
+    await cb.answer("Одобрено")
+    await cb.message.edit_text(cb.message.text + "\n\n✔️ <b>Одобрено</b>")
 
-    if action == "accept":
-        await bot.send_message(user_id, "Спасибо! Ваше сообщение принято 👌", reply_markup=restart_kb)
-        await c.message.edit_reply_markup()  # убираем кнопки
-        await c.answer("Принято")
-    else:
-        await bot.send_message(user_id, "К сожалению, сообщение отклонено 🙏", reply_markup=restart_kb)
-        await c.message.edit_reply_markup()
-        await c.answer("Отклонено")
+@router.callback_query(F.data == "reject")
+async def on_reject(cb: CallbackQuery) -> None:
+    await cb.answer("Отклонено")
+    await cb.message.edit_text(cb.message.text + "\n\n❌ <b>Отклонено</b>")
 
-# ─────────── restarts без /start ───────────
-@dp.callback_query(F.data == "restart")
-async def restart(c: CallbackQuery):
-    await c.message.answer("Что хотите отправить?", reply_markup=choice_kb)
-    await c.answer()
-
-# ─────────── запуск ───────────
-async def main():
-    logging.info("Bot is starting…")
+# ───────────────────── main ───────────────────────
+async def main() -> None:
+    logging.info("Bot is starting...")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
