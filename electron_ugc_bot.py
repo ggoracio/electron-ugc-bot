@@ -19,7 +19,7 @@ from dotenv import load_dotenv   # pip install python-dotenv
 
 load_dotenv()                              # берем переменные из .env (Railway тоже видит)
 BOT_TOKEN    = os.getenv("BOT_TOKEN")
-MOD_CHAT_ID  = int(os.getenv("MOD_CHAT_ID", "0"))   # id супергруппы-модераторов
+MOD_CHAT_ID  = int(os.getenv("MOD_CHAT_ID"))   # id супергруппы-модераторов
 
 logging.basicConfig(level=logging.INFO)
 bot  = Bot(BOT_TOKEN, parse_mode=ParseMode.HTML)
