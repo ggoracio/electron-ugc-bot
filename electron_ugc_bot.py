@@ -1,125 +1,102 @@
-# electron_ugc_bot.py
-import os
-import re
 import logging
+import os
 import asyncio
-
-from aiogram import Bot, Dispatcher, types, F
-from aiogram.enums.parse_mode import ParseMode
-from aiogram.filters import CommandStart, Command
-from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram import Bot, Dispatcher, F
+from aiogram.filters import Command
 from aiogram.types import (
-    ReplyKeyboardMarkup, KeyboardButton,
-    InlineKeyboardMarkup, InlineKeyboardButton
+    Message, CallbackQuery,
+    InlineKeyboardMarkup, InlineKeyboardButton,
+    ParseMode,
 )
 
-# --------------------------------------------------------------------------- #
-# 1. Конфигурация
+# ─────────── настройки ───────────
+BOT_TOKEN    = os.getenv("BOT_TOKEN")          # задайте в переменных окружения
+MOD_CHAT_ID  = int(os.getenv("MOD_CHAT_ID"))   # id супергруппы-модерации (-100…)
 
-load_dotenv()                              # берем переменные из .env (Railway тоже видит)
-BOT_TOKEN    = os.getenv("BOT_TOKEN")
-MOD_CHAT_ID  = int(os.getenv("MOD_CHAT_ID"))   # id супергруппы-модераторов
+if not BOT_TOKEN or not MOD_CHAT_ID:
+    raise SystemExit("❌  BOT_TOKEN или MOD_CHAT_ID не заданы!")
 
-logging.basicConfig(level=logging.INFO)
-bot  = Bot(BOT_TOKEN, parse_mode=ParseMode.HTML)
-dp   = Dispatcher(storage=MemoryStorage())          # простейшее FSM-хранилище
+logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s:%(message)s")
 
-# простая “база” — запоминаем сообщение-модерации -> (user_id, tag).
-PENDING: dict[int, tuple[int, str]] = {}
+bot = Bot(BOT_TOKEN, parse_mode=ParseMode.HTML)
+dp  = Dispatcher()
 
-# --------------------------------------------------------------------------- #
-# 2. Клавиатуры
-
-main_kb = ReplyKeyboardMarkup(
-    keyboard=[[KeyboardButton(text="💡 Идея"),
-               KeyboardButton(text="✉️ Фидбек")]],
-    resize_keyboard=True
+# ─────────── клавиатуры ───────────
+choice_kb = InlineKeyboardMarkup(
+    inline_keyboard=[
+        [InlineKeyboardButton(text="💡 Идея",   callback_data="idea")],
+        [InlineKeyboardButton(text="✉️ Фидбэк", callback_data="feedback")],
+    ]
 )
 
-again_kb = ReplyKeyboardMarkup(
-    keyboard=[[KeyboardButton(text="↻ Отправить ещё")]],
-    resize_keyboard=True
+decision_kb = lambda from_id: InlineKeyboardMarkup(
+    inline_keyboard=[[
+        InlineKeyboardButton("✅ Принять",  callback_data=f"accept:{from_id}"),
+        InlineKeyboardButton("🚫 Отклонить", callback_data=f"reject:{from_id}")
+    ]]
 )
 
-def mod_kb(user_id: int, tag: str):
-    """Кнопки для модераторов"""
-    cb_approve = f"approve:{user_id}:{tag}"
-    cb_reject  = f"reject:{user_id}:{tag}"
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="✅ Принять",  callback_data=cb_approve),
-         InlineKeyboardButton(text="❌ Отклонить", callback_data=cb_reject)]
-    ])
+restart_kb = InlineKeyboardMarkup(
+    inline_keyboard=[[InlineKeyboardButton("↩️ Ещё сообщение", callback_data="restart")]]
+)
 
-# --------------------------------------------------------------------------- #
-# 3. Хэндлеры пользователя
-
-@dp.message(CommandStart())
-async def cmd_start(m: types.Message):
+# ─────────── сценарий пользователя ───────────
+@dp.message(Command("start"))
+async def start(m: Message):
     await m.answer(
-        "Привет! Выберите, что хотите отправить ⤵️",
-        reply_markup=main_kb
+        "Привет! Что хотите отправить?",
+        reply_markup=choice_kb
     )
 
-@dp.message(F.text.in_(["💡 Идея", "✉️ Фидбек", "↻ Отправить ещё"]))
-async def choose_type(m: types.Message, state: types.FSMContext):
-    tag = "idea" if "Идея" in m.text else "feedback"
-    await state.update_data(tag=tag)            # сохраняем выбранный тип
-    await m.answer(
-        f"Введите текст { 'идеи' if tag=='idea' else 'фидбека' }:",
-        reply_markup=types.ReplyKeyboardRemove()
-    )
+@dp.callback_query(F.data.in_({"idea", "feedback"}))
+async def choose_type(c: CallbackQuery):
+    tag = "💡 Идея" if c.data == "idea" else "✉️ Фидбэк"
+    await c.message.answer(f"Хорошо, напишите {tag.lower()} одним сообщением.")
+    # запоминаем выбранный тип прямо в callback_data next step
+    await dp.storage.update_state(chat=c.message.chat.id, user=c.from_user.id, state=c.data)
+    await c.answer()
 
-@dp.message(~Command("start"))
-async def receive_text(m: types.Message, state: types.FSMContext):
-    data = await state.get_data()
-    tag  = data.get("tag")
-    if not tag:       # если пользователь написал, не выбрав тип
-        await m.answer("Сперва выберите <b>Идею</b> или <b>Фидбек</b>.", reply_markup=main_kb)
-        return
+@dp.message()  # ловим любое текстовое сообщение, когда есть сохранённое state
+async def receive_text(m: Message, state: str | None):
+    if state not in {"idea", "feedback"}:
+        return  # пользователь написал «лишнее» — игнорируем
 
-    caption = f"<b>{'Идея' if tag=='idea' else 'Фидбек'}</b> от <a href='tg://user?id={m.from_user.id}'>{m.from_user.full_name}</a>\n\n{m.text}"
+    tag = "💡 <b>Идея</b>" if state == "idea" else "✉️ <b>Фидбэк</b>"
     sent = await bot.send_message(
-        chat_id=MOD_CHAT_ID,
-        text=caption,
-        reply_markup=mod_kb(m.from_user.id, tag)
+        MOD_CHAT_ID,
+        f"{tag}\n\n{m.html_text}\n\n<b>От:</b> <a href='tg://user?id={m.from_user.id}'>{m.from_user.full_name}</a>",
+        reply_markup=decision_kb(m.from_user.id)
     )
-    # запоминаем, чтобы потом понять, кому отвечать
-    PENDING[sent.message_id] = (m.from_user.id, tag)
 
-    await m.answer(
-        "Спасибо! Сообщение отправлено на модерацию ✅",
-        reply_markup=again_kb
-    )
-    await state.clear()
+    await m.answer("Сообщение отправлено на модерацию ✅", reply_markup=restart_kb)
+    # очищаем state
+    await dp.storage.update_state(chat=m.chat.id, user=m.from_user.id, state=None)
 
-# --------------------------------------------------------------------------- #
-# 4. Хэндлеры модератора
-
-@dp.callback_query(F.data.regexp(r"^(approve|reject):(\d+):(\w+)$"))
-async def mod_action(cq: types.CallbackQuery):
-    action, user_id, tag = re.match(r"^(approve|reject):(\d+):(\w+)$", cq.data).groups()
+# ─────────── сценарий модератора ───────────
+@dp.callback_query(F.data.startswith(("accept", "reject")))
+async def moderator_action(c: CallbackQuery):
+    action, user_id = c.data.split(":")
     user_id = int(user_id)
 
-    # обновляем текст в групповом сообщении
-    status_text = "✅ Принято" if action == "approve" else "❌ Отклонено"
-    new_caption = cq.message.html_text + f"\n\n<b>{status_text}</b>"
-    await cq.message.edit_text(new_caption)     # уберём кнопки после решения
-    await cq.answer("Готово")
+    if action == "accept":
+        await bot.send_message(user_id, "Спасибо! Ваше сообщение принято 👌", reply_markup=restart_kb)
+        await c.message.edit_reply_markup()  # убираем кнопки
+        await c.answer("Принято")
+    else:
+        await bot.send_message(user_id, "К сожалению, сообщение отклонено 🙏", reply_markup=restart_kb)
+        await c.message.edit_reply_markup()
+        await c.answer("Отклонено")
 
-    # уведомляем автора
-    try:
-        note = "✅ Мы приняли вашу идею. Спасибо!" if action == "approve" \
-             else "❌ К сожалению, ваша идея не подошла."
-        await bot.send_message(user_id, note, reply_markup=again_kb)
-    except Exception as e:
-        logging.warning(f"Не удалось уведомить пользователя {user_id}: {e}")
+# ─────────── restarts без /start ───────────
+@dp.callback_query(F.data == "restart")
+async def restart(c: CallbackQuery):
+    await c.message.answer("Что хотите отправить?", reply_markup=choice_kb)
+    await c.answer()
 
-    # чистим “базу”
-    PENDING.pop(cq.message.message_id, None)
-
-# --------------------------------------------------------------------------- #
-# 5. Запуск
+# ─────────── запуск ───────────
+async def main():
+    logging.info("Bot is starting…")
+    await dp.start_polling(bot)
 
 if __name__ == "__main__":
-    logging.info("Bot is starting…")
-    asyncio.run(dp.start_polling(bot))
+    asyncio.run(main())
