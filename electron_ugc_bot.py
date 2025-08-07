@@ -12,7 +12,6 @@ from aiogram.types import (
     ReplyKeyboardMarkup, KeyboardButton,
     InlineKeyboardMarkup, InlineKeyboardButton
 )
-from dotenv import load_dotenv   # pip install python-dotenv
 
 # --------------------------------------------------------------------------- #
 # 1. Конфигурация
