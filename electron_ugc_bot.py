@@ -77,7 +77,7 @@ async def cmd_start(m: types.Message, state: FSMContext):
 
 @dp.callback_query(F.data == "begin", Form.welcomed)
 async def cb_begin(cb: types.CallbackQuery, state: FSMContext):
-    await cb.message.answer("Что вы хотите отправить?", reply_markup=reply_kb)
+    await cb.message.answer("Что вы хотите отправить? Нажмите на кнопку "Идея" или "Фидбек" ниже 👇", reply_markup=reply_kb)
     await state.set_state(Form.choosing)
     await cb.answer()
 
