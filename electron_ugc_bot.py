@@ -1,4 +1,3 @@
-# electron_ugc_bot.py
 import asyncio
 import logging
 import os
@@ -10,8 +9,7 @@ from aiogram.filters import CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.utils.keyboard import (
-    InlineKeyboardButton, InlineKeyboardMarkup,
-    ReplyKeyboardMarkup, KeyboardButton
+    InlineKeyboardButton, InlineKeyboardMarkup
 )
 
 # ─────────────── 1.  НАСТРОЙКИ ───────────────
@@ -27,29 +25,21 @@ MSG2USER: Dict[int, int] = {}          # id карточки ➜ id автора
 # ─────────────── 2.  СОСТОЯНИЯ ───────────────
 class Form(StatesGroup):
     welcomed = State()
-    choosing = State()
+    choosing = State()   # оставила для совместимости, но не используем
     writing  = State()
 
 # ─────────────── 3.  КНОПКИ ───────────────
 def begin_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="🚀 Приступить", callback_data="begin")]  # ← исправлено
+            [InlineKeyboardButton(text="▶️ Начать", callback_data="begin")]
         ]
     )
-
-reply_kb = ReplyKeyboardMarkup(
-    keyboard=[[
-        KeyboardButton(text="💡 Идея"),   # ← исправлено
-        KeyboardButton(text="📝 Фидбек")  # ← исправлено
-    ]],
-    resize_keyboard=True
-)
 
 def restart_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="↩ Предложить ещё идею",  # ← исправлено
+            [InlineKeyboardButton(text="📨 Отправить ещё сообщение",
                                   callback_data="restart")]
         ]
     )
@@ -57,9 +47,9 @@ def restart_kb() -> InlineKeyboardMarkup:
 def mod_inline(card_id: int, user_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="✅ Одобрить",  callback_data=f"approve:{card_id}:{user_id}")],  # ← исправлено
-            [InlineKeyboardButton(text="✏️ Правки",    callback_data=f"edit:{card_id}:{user_id}")],    # ← исправлено
-            [InlineKeyboardButton(text="❌ Отклонить", callback_data=f"reject:{card_id}:{user_id}")]   # ← исправлено
+            [InlineKeyboardButton(text="✅ Одобрить",  callback_data=f"approve:{card_id}:{user_id}")],
+            [InlineKeyboardButton(text="✏️ Правки",    callback_data=f"edit:{card_id}:{user_id}")],
+            [InlineKeyboardButton(text="❌ Отклонить", callback_data=f"reject:{card_id}:{user_id}")]
         ]
     )
 
@@ -69,7 +59,7 @@ async def cmd_start(m: types.Message, state: FSMContext):
     await state.clear()
     await m.answer(
         "👋 <b>Привет!</b>\n\n"
-        "Здесь вы можете поделиться <b>идеей</b> или оставить <b>фидбек</b>.\n"
+        "Здесь вы можете отправить сообщение: текст, фото, видео, документ или ссылку.\n"
         "Нажмите кнопку ниже, чтобы начать.",
         reply_markup=begin_kb()
     )
@@ -77,25 +67,16 @@ async def cmd_start(m: types.Message, state: FSMContext):
 
 @dp.callback_query(F.data == "begin", Form.welcomed)
 async def cb_begin(cb: types.CallbackQuery, state: FSMContext):
-    await cb.message.answer("Что вы хотите отправить? Нажмите на кнопку <b>Идея</b> или <b>Фидбек</b> ниже 👇", reply_markup=reply_kb)
-    await state.set_state(Form.choosing)
-    await cb.answer()
-
-@dp.message(Form.choosing, F.text.in_(["💡 Идея", "📝 Фидбек"]))
-async def choose_type(m: types.Message, state: FSMContext):
-    tag = "IDEA" if "Идея" in m.text else "FEEDBACK"
-    await state.update_data(tag=tag)
-    await m.answer(
-        "Пришлите сообщение одним отправлением.\n"
-        "Это может быть текст, фото, видео, документ — что угодно.",
-        reply_markup=types.ReplyKeyboardRemove()
+    await cb.message.answer(
+        "Отправьте <b>одно</b> сообщение одним отправлением: текст, фото, видео, документ или ссылку."
     )
     await state.set_state(Form.writing)
+    await cb.answer()
 
 @dp.message(Form.writing)
 async def receive_any(m: types.Message, state: FSMContext):
     data = await state.get_data()
-    tag  = data["tag"]
+    tag  = data.get("tag", "Сообщение")
 
     media_types = {
         "photo", "video", "document", "audio",
@@ -130,8 +111,10 @@ async def receive_any(m: types.Message, state: FSMContext):
 @dp.callback_query(F.data == "restart")
 async def restart(cb: types.CallbackQuery, state: FSMContext):
     await cb.answer()
-    await cb.message.answer("Что вы хотите отправить?", reply_markup=reply_kb)
-    await state.set_state(Form.choosing)
+    await cb.message.answer(
+        "Отправьте <b>одно</b> сообщение: текст, фото, видео, документ или ссылку."
+    )
+    await state.set_state(Form.writing)
 
 @dp.callback_query(F.data.regexp(r"^(approve|edit|reject):"))
 async def moderation_action(cb: types.CallbackQuery):
@@ -139,11 +122,11 @@ async def moderation_action(cb: types.CallbackQuery):
     user_id = int(user_id)
 
     if action == "approve":
-        text = "Ваша идея одобрена! 🎉"
+        text = "Ваше сообщение одобрено! 🎉"
     elif action == "edit":
-        text = "Спасибо! Есть пара уточнений по вашей идее; мы свяжемся позже. ✏️"
+        text = "Спасибо! Есть пара уточнений по вашему сообщению; мы свяжемся позже. ✏️"
     else:
-        text = "К сожалению, ваша идея не подошла. Но не останавливайтесь! ❌"
+        text = "К сожалению, ваше сообщение не подошло. Но не останавливайтесь! ❌"
 
     try:
         await bot.send_message(user_id, text, reply_markup=restart_kb())
