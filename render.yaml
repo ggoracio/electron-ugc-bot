@@ -1,5 +1,5 @@
 services:
-  - type: worker          # если нужно как Web Service — поставь type: web
+  - type: web         # если нужно как Web Service — поставь type: web
     name: electron-ugc-bot
     env: python
     plan: free
