@@ -1,0 +1,13 @@
+services:
+  - type: worker          # если нужно как Web Service — поставь type: web
+    name: electron-ugc-bot
+    env: python
+    plan: free
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "python electron_ugc_bot.py"
+    autoDeploy: true
+    envVars:
+      - key: BOT_TOKEN
+        sync: false       # задашь значение в UI Render
+      - key: MOD_CHAT_ID
+        sync: false
